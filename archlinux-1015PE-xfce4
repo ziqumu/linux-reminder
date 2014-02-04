@@ -1,0 +1,166 @@
+Notations :
+	commande xxx :
+		xxx 
+	Ecrire à la suite xxxxx
+		+> xxxxx
+	Remplacer tout le contenu (s'il y en a) par xxxxx
+		=> xxxxx
+	Commentaires xxxx :
+		:> xxxx
+	Ouvrir avec sublime-text en mode root
+		sublime:
+
+
+Parition du disque
+	 - j'ai utilisé Gparted Live en USB, config actuelle :
+	 	disque dur sda :
+	 		- sda1 : partition etendue (sorte de dossier contenant plusieurs partitions)
+	 			- sda5 : partition de boot : monté en /boot/ (100mo) ext2
+	 			- sda6 : partition de swap (3go)
+	 			- sda7 : partition système : monté en / (25go) ext4
+	 			- sda8 : partition utilisateur : monté en /home/ (70go, le reste en fait) ext4
+	 		- sda3 : parition en ntfs contenant les données de windows, sera supprimé dans le futur, mais pas pour l'instant
+	 - On peut eventuelement récupérer les nom de partition (sdax) avec l'une des commandes suivantes
+		 cat /proc/partitions 
+		 fdisk -l
+	 - A faire pour activer le swap: 
+		mkswap /dev/sda6
+		swapon /dev/sda6
+	 - Si besoin on peut formater les partitions
+	 	mkfs.ext2 /dev/sda5
+		mkfs.ext4 /dev/sda7
+		mkfs.ext4 /dev/sda8
+Réglages temporaires
+	- Clavier 
+		loadkeys fr-pc
+	- Wifi
+		wifi-menu
+	- Montage des partitions
+		mount /dev/sda7 /mnt && mkdir /mnt/{boot,home} && mount /dev/sda5 /mnt/boot
+		mount /dev/sda8 /mnt/home
+	- Régler la date si trop différente pour installer les paquets
+		date -s "01/30/2014 04:07:00"
+Installation de la base ainsi que la base developpement
+	pacstrap /mnt base base-devel
+Installation de syslinux pour changer de grub
+	pacstrap /mnt syslinux
+Installer dialog afin de pouvoir utiliser wifi-menu par la suite
+	pacstrap /mnt dialog wpa_supplicant
+Installation de ntfs-3g pour pouvoir detecter le disque dur en ntfs
+	pacstrap /mnt ntfs-3g
+Montage du disque ntfs
+	mkdir /mnt/mnt/win
+	ntfs-3g /dev/sda3 /mnt/mnt/win
+Config
+- generation du /mnt/etc/fstab
+	genfstab -U -p /mnt >> /mnt/etc/fstab
+	:> j'ai beaucoup d'erreur du type "Unable to read" mais tout semble bien se passer (sur une nouvelle installation, aucun message)
+- Verifier ensuite, les 5 paritions doivent être présentes (swap et ntfs compris)
+	nano /mnt/etc/fstab
+	:> remplacez "fuseblk" par "ntfs-3g" sinon ça plantera au démarrage (sur une nouvelle installation, il s'est mis tout seul en ntfs.. laisser)
+- chroot dans le nouveau systeme
+	arch-chroot /mnt
+- Ecriture du nom de machine (arch-bob)
+	nano /etc/hostname
+- local timezone
+	ln -s /usr/share/zoneinfo/Europe/Paris /etc/localtime
+- Décommenter la locale "fr_FR.UTF-8 UTF-8"
+	nano /etc/locale.gen
+- Generation des locales
+	locale-gen
+- Config des locales
+	nano /etc/locale.conf
+	+>LANG="fr_FR.UTF-8"
+	:> le fichier est vide à la base
+- Config du layout clavier dans /etc/vconsole.conf
+	nano /etc/vconsole.conf
+	+>KEYMAP=fr-pc
+	:> le fichier est vide à la base (sur une nouvelle installation)
+- Config /etc/mkinitcpio.conf
+	nano /etc/mkinitcpio.conf
+	:> remplacer 
+		HOOKS="[..]"
+	:> par
+		HOOKS="[..] resume"
+- Creation du ramdisk
+	mkinitcpio -p linux
+Configurer syslinux
+	nano /boot/syslinux/syslinux.cfg
+	:> changer la partition de arch et archfallback pour que ce soit sda7
+Puis afin que l'hibernation fonctionne, dans arch : 
+	 :> remplacer
+		APPEND root=/dev/sda7 rw
+	 :> par
+		APPEND root=/dev/sda7 rw resume=/dev/sda6
+- Installation sur le mbr
+	syslinux-install_update -iam
+Changement du password root
+	passwd
+On sorte du chroot, on démonte tout et on reboot
+	exit
+	umount /mnt/boot /mnt/home /mnt/mnt/win /mnt
+	reboot
+RETIER LA CLE
+Connexion à la wifi (choisir un nom de profil simple)
+	wifi-menu
+	netctl enable <profil>
+	:>Il peut y avoir quelques messages d'erreur après netctl enable, mais ils partent au reboot et tout fonctionne bien
+Installation de Zsh, un shell qui améliore les proposition avec tab et différents autres truc, en prenant la config par default de l'install d'arch
+	 pacman -Syu grml-zsh-config
+Creation du compte utilisateur
+	pacman -Syu sudo
+	groupadd sudo
+	useradd -g sudo -m -s /bin/zsh bob
+	EDITOR=nano visudo
+	:> uncomment "%sudo ALL=(ALL) ALL"
+	passwd bob
+	+>mot de passe de bob
+Pour la config de ZSH on verra quand on aurra un environement graphique, ça sera plus simple pour copier, coller, mais j'aime bien le theme adam2
+Installer env graphique
+	pacman -S xfce4 xfce4-goodies
+	nano ~/.xinitrc
+	+>exec startxfce4
+Installe X.org
+	pacman -S xorg
+Tentons de lancer l'interface graphique :
+	startx
+	:> choisir parametres par default
+	:> se deconnecter en décochant la case pour conserver la session
+Config du clavier dans xfce4
+	sudo nano /etc/X11/xorg.conf.d/10-evdev.conf
+	:> dessous de 
+		Identifier "evdev keyboard catchall"
+	:> ajouter
+		Option "XkbLayout" "fr"
+L'hibernation devrait déjà fonctionner via la commande 
+	sudo systemctl hibernate
+Ou via l'interface de xfce4 car les régalges ont été fait pendant l'instalation
+Réglage de l'hibernation
+	sudo nano /sys/power/image_size
+	 =>2000000000
+	 :>c'est la taille maximum que prend l'image de la ram sur la partition swap. Comme j'ai 3go de swap et 2 de ram, je peux mettre 2go
+Ajout du repo archlinux fr
+	sudo nano /etc/pacman.conf
+	+>
+		[archlinuxfr]
+		SigLevel = Never
+		Server = http://repo.archlinux.fr/$arch
+Installation de yaourt (téléchargement d'app sur le aur)
+	sudo pacman -Syu yaourt
+Installation de sublime-text
+	sudo pacman -S sublime-text
+Lancer ensuite l'interface graphique
+	startx
+Lancer Sublime texte en mode root pour faire les modifs qui vont suivre (executer la commande dans un emulateur de terminal)
+	sudo subl
+Ouvrir un nouvel onglet dans le terminal
+Réglage de boutons et fermeture laptop
+	sudo pacman -S acpid
+	sudo systemctl enable acpid.service
+	sublime: /etc/systemd/logind.conf
+	:>decommenter et donner la valeur ignore à
+		HandlePowerKey=ignore
+		HandleSuspendKey=ignore
+		HandleHibernateKey=ignore
+		HandleLidSwitch=ignore
+	sublime: /etc/acpi/handler.sh
